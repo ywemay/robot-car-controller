@@ -11,6 +11,10 @@ Package `com.ywemay.robotcar` · Kotlin + Jetpack Compose · minSdk 24 (Android 
 
 | Requirement | Where it lives |
 |---|---|
+| First screen: a "car face" that blinks when idle | `ui/FaceScreen.kt` |
+| Double-tap the face → control dashboard | `MainActivity.RobotCarApp()` |
+| Embedded web server + remote-control page | `web/WebControlServer.kt`, `web/RobotWebServer.kt`, `web/ControlPage.kt` |
+| One command hub shared by the on-device UI *and* the web UI | `control/CarControl.kt` |
 | USB serial to a Nano (CH340/FTDI/CP210x/PL2303/CDC-ACM) | `usb/UsbSerialManager.kt` + `com.github.mik3y:usb-serial-for-android:3.8.1` |
 | Auto-connect the instant the OTG cable is plugged in | manifest `USB_DEVICE_ATTACHED` intent-filter + runtime `BroadcastReceiver` |
 | 115200 / 8 / 1 / none, enforced | `UsbSerialManager.openPort()` → `setParameters(115200, 8, STOPBITS_1, PARITY_NONE)` |
@@ -48,23 +52,37 @@ The two servos move as a pair, so each slider event re-sends *both* current
 angles. Angles are clamped 0–180 and speed 0–255 inside `CommandEngine`, so no
 UI value can ever emit a frame the sketch would reject.
 
+Since `CommandEngine` is reached through the shared `CarControl` hub, the exact
+same frames can be produced remotely: `GET /cmd?d=F&s=180` emits `D,F,180\n` and
+`GET /camera?pan=45&tilt=90` emits `C,45,90\n` (see §9). The browser is not a
+second implementation — it drives the identical code path.
+
 ---
 
 ## 3. Architecture
 
 ```
 MainActivity (ComponentActivity)
- │  onStart -> UsbSerialManager.start(this)   register hot-plug receiver + probe
- │  onStop  -> UsbSerialManager.stop()        unregister (port stays OPEN)
+ │  onCreate -> WebControlServer.start()       embedded HTTP server, process lifetime
+ │  onStart  -> UsbSerialManager.start(this)   register hot-plug receiver + probe
+ │  onStop   -> UsbSerialManager.stop()        unregister (port stays OPEN)
+ │  onDestroy(isFinishing) -> WebControlServer.stop()
  │  setContent { CompositionLocalProvider(LocalLifecycleOwner provides this) { … } }
  │
- ├── RobotCarViewModel (AndroidViewModel)
- │     connection / logs  <-- re-exposed StateFlows from the manager
- │     pan / tilt         <-- the only genuinely UI-local state
- │     onDrive(char)  onPanChanged(Int)  onTiltChanged(Int)  clearLog()
+ ├── RobotCarApp   two screens, Crossfade + BackHandler
+ │     ├── ui/FaceScreen       FIRST SCREEN — drawn eyes/mouth, idle blinks, double-tap to open
+ │     └── ui/RobotCarScreen   UsbStatusBanner · DrivePad · CameraControls · DebugLogPanel
+ │                              + a slim header carrying the web URL and a back-to-face button
  │
- ├── ui/RobotCarScreen (Compose)
- │     UsbStatusBanner  ·  DrivePad  ·  CameraControls  ·  DebugLogPanel
+ ├── RobotCarViewModel (AndroidViewModel) — thin bridge; owns no real state
+ │
+ ├── control/CarControl   ← THE command hub, used by BOTH front-ends
+ │     pan / tilt StateFlows · drive() · setPan() · setTilt() · setCamera() · stop()
+ │        └── CommandEngine.drive()/camera() -> UsbSerialManager.send()
+ │
+ ├── web/WebControlServer  (object) — owns the NanoHTTPD instance + the LAN URL
+ │     └── web/RobotWebServer   routes / , /status , /cmd , /camera , /stop
+ │           └── ControlPage.HTML   self-contained remote-control page (no CDN)
  │
  └── usb/UsbSerialManager   ← the single owner of the cable (object singleton)
        ├── BroadcastReceiver   ATTACHED / DETACHED / USB_PERMISSION
@@ -75,6 +93,12 @@ MainActivity (ComponentActivity)
 ```
 
 Design decisions worth knowing:
+
+* **One command hub, two drivers.** The car now has two independent front-ends
+  (the on-device dashboard and the Wi-Fi web page). Both funnel through
+  `CarControl`, so pan/tilt pose and the frame format live in exactly one place
+  and the two controllers cannot drift apart. `RobotCarViewModel` is a bridge
+  over it, not a second source of truth.
 
 * **The manager is an `object`, not a per-Activity instance.** There is one cable
   and one chip on it; the link must survive Activity recreation (permission
@@ -101,12 +125,18 @@ Design decisions worth knowing:
 
 ```xml
 <uses-feature android:name="android.hardware.usb.host" android:required="true" />
+<uses-permission android:name="android.permission.INTERNET" />
 ```
 
 There is **no `android.permission.USB_PERMISSION`** declaration — that string is
 not a real platform permission. USB host access is gated by the `<uses-feature>`
 above plus per-device grants the system hands out at runtime via
 `UsbManager.requestPermission()`.
+
+`INTERNET` is a normal permission and is what lets the embedded NanoHTTPD server
+open a listening TCP socket. It is also what lets the app enumerate
+`java.net.NetworkInterface` to find the Wi-Fi IPv4 address it prints as the
+connect URL.
 
 The auto-launch block on `MainActivity`:
 
@@ -142,7 +172,7 @@ ANDROID_SDK_ROOT=/home/dorian/Android/Sdk \
 ./gradlew :app:assembleDebug
 ```
 
-APK → `app/build/outputs/apk/debug/app-debug.apk` (~8.7 MB).
+APK → `app/build/outputs/apk/debug/app-debug.apk` (~10.5 MB).
 
 Toolchain (same proven matrix as the other `com.ywemay.*` Android repos):
 AGP 8.13.0 · Kotlin 1.9.24 · Gradle 8.13 · compileSdk/targetSdk 34 · minSdk 24 ·
@@ -199,8 +229,74 @@ Two things in it are worth copying even if you write your own sketch:
 
 ---
 
-## 8. Manual test plan
+## 8. The face screen
 
+The app opens on a **face**, not the dashboard: two eyes and a smile drawn with
+Compose `Canvas` (no image assets — it scales to any screen). It exists so the
+car has an "off" state that is not a black rectangle, and so the driver has to
+make a deliberate gesture before any control is live.
+
+* **Idle animation.** Blinks on a random 2.8–6.4 s timer, with an occasional
+  double-blink, an occasional slow "sleepy" blink, a small wandering gaze, and a
+  slow breathing scale. A single tap triggers a blink back (acknowledgement).
+* **Double-tap anywhere → the control dashboard.** `detectTapGestures(onDoubleTap = …)`.
+* **Status without opening controls.** A USB status pill sits at the top of the
+  face and the web-control URL at the bottom, so link state and the address to
+  type into a laptop are both visible from the "off" screen.
+
+Tuning note: the proportions (eye size/spacing, smile depth and height) were
+checked by mirroring the same drawing maths in a PIL script and rendering it,
+because there is no device in the loop; the constants in `FaceIllustration()`
+are the single source of truth.
+
+---
+
+## 9. Web control interface (remote)
+
+The app runs an embedded **NanoHTTPD** server on port **8080**. Open
+`http://<phone-ip>:8080` from any browser on the same Wi-Fi — no app, no install.
+
+| Route | Does |
+|---|---|
+| `GET /` | the control page (D-pad, gimbal sliders, live status, activity log) |
+| `GET /status` | JSON: USB state, device, pan, tilt, last frame, advertised address |
+| `GET /cmd?d=F&s=180` | drive frame — `d` ∈ F/B/L/R/S, `s` optional 0–255 |
+| `GET /drive?dir=R` | alias of `/cmd` |
+| `GET /camera?pan=45&tilt=90` | gimbal frame — either argument may be omitted |
+| `GET /stop` | explicit kill frame `D,S,0` |
+
+```bash
+curl 'http://192.168.1.50:8080/cmd?d=F&s=180'      # -> {"ok":true,"sent":true,"frame":"D,F,180"}
+curl 'http://192.168.1.50:8080/camera?pan=45'       # -> {"ok":true,...,"pan":45,"tilt":90,...}
+curl -s http://192.168.1.50:8080/status
+```
+
+Behaviour worth knowing:
+
+* **Hold to drive, release to stop.** The page uses pointer events, so pressing
+  and holding a direction keeps moving and releasing sends `D,S,0`. Keyboard
+  `W A S D` / arrows drive, `Space` stops.
+* **Same hub as the app.** Every route calls `CarControl`, so a command from the
+  browser lands in the same debug log and moves the same gimbal sliders as the
+  on-device UI.
+* **Offline-friendly page.** The HTML/CSS/JS is a single self-contained string
+  (`ControlPage.HTML`) — no CDN — so it works on a car with no internet.
+* **Server lifetime.** Started in `onCreate`, deliberately **not** stopped in
+  `onStop`, so the link survives the phone's screen going dark. Stopped only when
+  the Activity finishes. The address is recomputed per `/status` poll, so a DHCP
+  change does not require an app restart.
+
+> **Security:** there is no authentication. It assumes the robot's own trusted
+> LAN, which is the same assumption the camera app makes. Anyone on that network
+> can drive the car. Do not put this on an untrusted Wi-Fi, and if it ever needs
+> to be, add a shared-secret header check in `RobotWebServer.serve()`.
+
+---
+
+## 10. Manual test plan
+
+0. Launch with no cable → the **face** appears and blinks. Tap it once (a blink),
+   then double-tap → the dashboard opens. Press Back → the face returns.
 1. Launch the app with **no cable** → banner is **red**, "No USB link".
 2. Press Forward → log shows `» TX  D,F,180\n` in blue, and
    `· SYS  TX blocked (no link)` in amber. Nothing crashes.
@@ -211,11 +307,24 @@ Two things in it are worth copying even if you write your own sketch:
    pan value stays at wherever you left it.
 6. Unplug the cable → banner returns to **red** instantly, `LINK LOST`.
 7. Tap the banner to force a manual re-probe.
+8. Open `http://<phone-ip>:8080` on a laptop → the remote page loads, the status
+   dot is green and the sliders show the current angles. Press and hold ▲ on the
+   page → the motors run; release → stop. Repeat with `W`/`A`/`S`/`D`. Now drag a
+   slider on the *phone* and watch the browser's slider follow within ~1.2 s.
+9. `curl -s http://<phone-ip>:8080/status` returns the JSON snapshot;
+   `curl 'http://<phone-ip>:8080/cmd?d=F'` makes the same log entry as the button.
 
 ---
 
-## 9. Known limits
+## 11. Known limits
 
+* The web server has **no authentication** — it trusts the LAN. See §9.
+* The web server lives for the life of the app **process**, not in a foreground
+  service. It survives screen-off and backgrounding, but if Android kills the
+  process (or the user swipes the app away) the link drops. Promoting
+  `WebControlServer` to a foreground service is the fix if that ever matters.
+* The face's blink cadence is a fixed random range; there is no "sleep after N
+  minutes idle" state yet.
 * One serial device at a time — the manager takes the first supported driver it
   finds. A multi-bridge rig would need device selection.
 * The debug log is a 500-line ring buffer; older lines are dropped from the top.
