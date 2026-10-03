@@ -365,7 +365,7 @@ private fun DebugLogPanel(
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    text = "${logs.size} lines",
+                    text = if (logs.size == 1) "1 line" else "${logs.size} lines",
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
                     color = Color(0xFF5A6C78),
@@ -390,7 +390,7 @@ private fun DebugLogPanel(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 4.dp),
                 ) {
                     items(logs, key = { it.id }) { entry -> LogLine(entry) }
                 }
@@ -430,6 +430,9 @@ private fun LogLine(entry: LogEntry) {
         Spacer(Modifier.width(6.dp))
         Text(
             text = entry.text,
+            // Fill the remaining Row width so a wrapped line breaks flush with
+            // the message column instead of hanging past the timestamp gutter.
+            modifier = Modifier.weight(1f),
             fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
             color = Color(0xFFD6DEE4),
