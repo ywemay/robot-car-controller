@@ -12,6 +12,8 @@ Package `com.ywemay.robotcar` · Kotlin + Jetpack Compose · minSdk 24 (Android 
 | Requirement | Where it lives |
 |---|---|
 | First screen: a "car face" that blinks when idle | `ui/FaceScreen.kt` |
+| Nine face emotions (neutral, happy, love, excited, surprised, sad, angry, sleepy, wink) | `control/Emotion.kt` + `ui/FaceScreen.kt` |
+| Mood control from the browser *and* from the dashboard | `GET /emotion?e=<slug>` + `MoodStrip` |
 | Double-tap the face → control dashboard | `MainActivity.RobotCarApp()` |
 | Embedded web server + remote-control page | `web/WebControlServer.kt`, `web/RobotWebServer.kt`, `web/ControlPage.kt` |
 | One command hub shared by the on-device UI *and* the web UI | `control/CarControl.kt` |
@@ -70,19 +72,27 @@ MainActivity (ComponentActivity)
  │  setContent { CompositionLocalProvider(LocalLifecycleOwner provides this) { … } }
  │
  ├── RobotCarApp   two screens, Crossfade + BackHandler
- │     ├── ui/FaceScreen       FIRST SCREEN — drawn eyes/mouth, idle blinks, double-tap to open
- │     └── ui/RobotCarScreen   UsbStatusBanner · DrivePad · CameraControls · DebugLogPanel
- │                              + a slim header carrying the web URL and a back-to-face button
+ │     ├── ui/FaceScreen       FIRST SCREEN — drawn eyes/mouth, nine moods, idle blinks,
+ │     │                       double-tap to open
+ │     └── ui/RobotCarScreen   UsbStatusBanner · MoodStrip · DrivePad · CameraControls
+ │                              · DebugLogPanel + a slim header with the web URL and back button
  │
  ├── RobotCarViewModel (AndroidViewModel) — thin bridge; owns no real state
  │
+ ├── control/Emotion      nine moods as pure data (eye shape/openness, brow tilt+lift,
+ │                        pupil, mouth archetype, blush/tear/wink, ARGB tint) + slug lookup
+ │
  ├── control/CarControl   ← THE command hub, used by BOTH front-ends
- │     pan / tilt StateFlows · drive() · setPan() · setTilt() · setCamera() · stop()
+ │     pan / tilt / emotion StateFlows · drive() · setPan() · setTilt() · setCamera()
+ │     · setEmotion() · stop()
  │        └── CommandEngine.drive()/camera() -> UsbSerialManager.send()
+ │            (setEmotion writes nothing — an emotion is presentation, not a frame)
  │
  ├── web/WebControlServer  (object) — owns the NanoHTTPD instance + the LAN URL
- │     └── web/RobotWebServer   routes / , /status , /cmd , /camera , /stop
- │           └── ControlPage.HTML   self-contained remote-control page (no CDN)
+ │     └── web/RobotWebServer   routes / , /status , /cmd , /camera , /stop ,
+ │     │                        /emotions , /emotion
+ │     └── ControlPage.HTML   self-contained remote-control page (no CDN);
+ │                            its mood grid is built from /emotions at load
  │
  └── usb/UsbSerialManager   ← the single owner of the cable (object singleton)
        ├── BroadcastReceiver   ATTACHED / DETACHED / USB_PERMISSION
@@ -96,9 +106,9 @@ Design decisions worth knowing:
 
 * **One command hub, two drivers.** The car now has two independent front-ends
   (the on-device dashboard and the Wi-Fi web page). Both funnel through
-  `CarControl`, so pan/tilt pose and the frame format live in exactly one place
-  and the two controllers cannot drift apart. `RobotCarViewModel` is a bridge
-  over it, not a second source of truth.
+  `CarControl`, so pan/tilt pose, the current mood and the frame format live in
+  exactly one place and the two controllers cannot drift apart.
+  `RobotCarViewModel` is a bridge over it, not a second source of truth.
 
 * **The manager is an `object`, not a per-Activity instance.** There is one cable
   and one chip on it; the link must survive Activity recreation (permission
@@ -243,11 +253,49 @@ make a deliberate gesture before any control is live.
 * **Status without opening controls.** A USB status pill sits at the top of the
   face and the web-control URL at the bottom, so link state and the address to
   type into a laptop are both visible from the "off" screen.
+* **Current mood** is printed under the URL, tinted with that mood's colour.
+
+### Emotions
+
+The face can wear nine moods, and any of them can be set from the browser:
+
+| Slug | Reads as | How it is drawn |
+|---|---|---|
+| `neutral` | resting / content | pill eyes, gentle smile |
+| `happy` | happy | arc ( ∩ ) eyes, wide grin |
+| `love` | affectionate | arc eyes, smile, pink blush |
+| `excited` | excited | big round eyes with pupils, grin, blush |
+| `surprised` | surprised | widest round eyes, raised brows, open "O" mouth |
+| `sad` | sad | inner-ended-up brows, frown, a teardrop |
+| `angry` | angry | narrowed eyes, inner-ended-down brows, flat mouth |
+| `sleepy` | sleepy | eyes squashed almost shut, flat mouth |
+| `wink` | playful | one eye shut, small smirk |
+
+The design goal was that **a mood is data, not code**. `Emotion.kt` carries a
+shape for each mood — eye shape (`CAPSULE` / `ROUND` / `ARC`), base openness,
+brow tilt and lift, pupil size, mouth archetype, blush/tear/wink flags and an
+ARGB tint — and `FaceIllustration()` just reads those fields. There is no
+per-emotion `when` in the renderer, so adding a tenth mood means adding one row
+to the enum and nothing else: the Compose face, the dashboard strip and the
+web page's button grid all derive from the same list.
+
+Two deliberate choices:
+
+* **An emotion is never a serial frame.** It changes what the car *looks* like,
+  not what it *does*, so nothing is written to the link. It still lives on
+  `CarControl` alongside the gimbal pose, for the same reason the pose does: the
+  face and the web page are two independent drivers of one value, and separate
+  copies would drift.
+* **The idle blink still runs on every mood.** The mood supplies the base
+  openness; the blink signal multiplies it. So even a drawn expression blinks
+  like a real face, and an arc eye (`∩`) flattens into a line on a blink.
 
 Tuning note: the proportions (eye size/spacing, smile depth and height) were
 checked by mirroring the same drawing maths in a PIL script and rendering it,
 because there is no device in the loop; the constants in `FaceIllustration()`
-are the single source of truth.
+are the single source of truth. The same script renders all nine moods to a
+grid (`/tmp/robotcar/webtest/moods.png` while it existed) — worth re-running
+after any geometry change.
 
 ---
 
@@ -258,16 +306,20 @@ The app runs an embedded **NanoHTTPD** server on port **8080**. Open
 
 | Route | Does |
 |---|---|
-| `GET /` | the control page (D-pad, gimbal sliders, live status, activity log) |
-| `GET /status` | JSON: USB state, device, pan, tilt, last frame, advertised address |
+| `GET /` | the control page (mood grid, D-pad, gimbal sliders, live status, activity log) |
+| `GET /status` | JSON: USB state, device, pan, tilt, last frame, **emotion**, advertised address |
 | `GET /cmd?d=F&s=180` | drive frame — `d` ∈ F/B/L/R/S, `s` optional 0–255 |
 | `GET /drive?dir=R` | alias of `/cmd` |
 | `GET /camera?pan=45&tilt=90` | gimbal frame — either argument may be omitted |
 | `GET /stop` | explicit kill frame `D,S,0` |
+| `GET /emotions` | JSON list of every mood + which one is current (drives the page's buttons) |
+| `GET /emotion?e=happy` | change the car's expression — 400 with the valid slugs if unknown |
 
 ```bash
 curl 'http://192.168.1.50:8080/cmd?d=F&s=180'      # -> {"ok":true,"sent":true,"frame":"D,F,180"}
 curl 'http://192.168.1.50:8080/camera?pan=45'       # -> {"ok":true,...,"pan":45,"tilt":90,...}
+curl 'http://192.168.1.50:8080/emotion?e=angry'     # -> {"ok":true,"emotion":"angry","label":"Angry"}
+curl -s http://192.168.1.50:8080/emotions           # -> {"ok":true,"current":"angry","emotions":[...]}
 curl -s http://192.168.1.50:8080/status
 ```
 
@@ -278,7 +330,11 @@ Behaviour worth knowing:
   `W A S D` / arrows drive, `Space` stops.
 * **Same hub as the app.** Every route calls `CarControl`, so a command from the
   browser lands in the same debug log and moves the same gimbal sliders as the
-  on-device UI.
+  on-device UI — and a mood set from the browser turns up on the phone's face
+  immediately, then on every other open browser within one status poll.
+* **The mood buttons are fetched, not hard-coded.** The page asks for
+  `/emotions` and builds the grid from the reply, so the `Emotion` enum stays the
+  single source of truth and adding a mood needs no page edit at all.
 * **Offline-friendly page.** The HTML/CSS/JS is a single self-contained string
   (`ControlPage.HTML`) — no CDN — so it works on a car with no internet.
 * **Server lifetime.** Started in `onCreate`, deliberately **not** stopped in
@@ -313,12 +369,28 @@ Behaviour worth knowing:
    slider on the *phone* and watch the browser's slider follow within ~1.2 s.
 9. `curl -s http://<phone-ip>:8080/status` returns the JSON snapshot;
    `curl 'http://<phone-ip>:8080/cmd?d=F'` makes the same log entry as the button.
+10. On the remote page, the **FACE MOOD** grid shows nine buttons with the
+    current mood highlighted. Tap **Angry** → the phone's face changes to angry
+    immediately (narrowed eyes, slanted brows) and the log gains `Emotion: Angry`.
+    Open the page on a *second* device → within ~1.2 s its grid highlights Angry
+    too, without touching it.
+11. `curl 'http://<phone-ip>:8080/emotion?e=wink'` → `{"ok":true,...}` and the
+    face winks. `curl 'http://<phone-ip>:8080/emotion?e=nope'` → HTTP 400 naming
+    the valid slugs. `curl -s http://<phone-ip>:8080/emotions` lists all nine and
+    reports `"current"`.
+12. On the dashboard, swipe the mood strip and pick **Sleepy**; return to the
+    face (`◀ FACE`) → the face is sleepy. The browser's grid follows within one
+    poll.
 
 ---
 
 ## 11. Known limits
 
 * The web server has **no authentication** — it trusts the LAN. See §9.
+* Moods are **sticky**: the car stays in the mood it was given until something
+  changes it. There is no auto-revert-to-neutral timer, so a `surprised` face set
+  an hour ago is still surprised. A timed `setEmotion(e, holdMillis)` would be
+  the obvious next step if that gets annoying.
 * The web server lives for the life of the app **process**, not in a foreground
   service. It survives screen-off and backgrounding, but if Android kills the
   process (or the user swipes the app away) the link drops. Promoting
