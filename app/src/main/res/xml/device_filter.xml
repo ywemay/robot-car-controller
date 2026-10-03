@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    USB attach filter.
+
+    Anything listed here makes the OS (a) auto-launch MainActivity when the
+    cable is plugged in and (b) pre-grant USB access to the app, so the very
+    first command can go out without a permission dialog.
+
+    Keep this list TIGHT. A broad entry (e.g. generic CDC-ACM class 2) makes the
+    app hijack the attach event of unrelated gear such as USB modems. Devices
+    that are NOT listed still work — UsbSerialManager probes for them at runtime
+    and falls back to the standard requestPermission() dialog.
+
+    Vendor/Product ids are decimal (the XML attribute takes decimal; the hex
+    value is in the trailing comment).
+-->
+<resources>
+
+    <!-- WCH CH340 / CH341 — the usual bridge on Arduino Nano/Uno clones. -->
+    <usb-device vendor-id="6790" product-id="29987" />   <!-- 0x1A86:0x7523 CH340 -->
+    <usb-device vendor-id="6790" product-id="21795" />   <!-- 0x1A86:0x5523 CH341 -->
+
+    <!-- FTDI FT232R / FT2232 / FT231X — genuine Nano & Uno R2 USB-serial. -->
+    <usb-device vendor-id="1027" product-id="24577" />   <!-- 0x0403:0x6001 FT232R -->
+    <usb-device vendor-id="1027" product-id="24592" />   <!-- 0x0403:0x6010 FT2232H -->
+    <usb-device vendor-id="1027" product-id="24593" />   <!-- 0x0403:0x6011 FT4232H -->
+    <usb-device vendor-id="1027" product-id="24596" />   <!-- 0x0403:0x6014 FT232H -->
+    <usb-device vendor-id="1027" product-id="24601" />   <!-- 0x0403:0x6015 FT231X -->
+
+    <!-- Silicon Labs CP2102 / CP2104 — Nano Every, NodeMCU variants. -->
+    <usb-device vendor-id="4292" product-id="60000" />   <!-- 0x10C4:0xEA60 CP2102 -->
+
+    <!-- Prolific PL2303 — older clones. -->
+    <usb-device vendor-id="1659" product-id="8963" />    <!-- 0x067B:0x2303 PL2303 -->
+
+    <!-- Arduino official boards with the ATmega16U2/32U4 USB bridge (CDC-ACM). -->
+    <usb-device vendor-id="9025" product-id="67" />      <!-- 0x2341:0x0043 Uno R3 -->
+    <usb-device vendor-id="9025" product-id="66" />      <!-- 0x2341:0x0042 Mega 2560 R3 -->
+    <usb-device vendor-id="9025" product-id="769" />     <!-- 0x2341:0x0301 Uno R3 DFU -->
+    <usb-device vendor-id="9025" product-id="1155" />    <!-- 0x2341:0x0483 Micro/Leonardo -->
+
+    <!-- Arduino SA (Arduino.org) variants. -->
+    <usb-device vendor-id="10755" product-id="67" />     <!-- 0x2A03:0x0043 -->
+    <usb-device vendor-id="10755" product-id="66" />     <!-- 0x2A03:0x0042 -->
+
+</resources>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        ============================ USB HOST ============================
+        USB host access is NOT a runtime "<uses-permission>" on Android — it is
+        gated by this <uses-feature> plus per-device permission grants that the
+        system hands out at runtime. Declaring it makes the app non-installable
+        on hardware without a USB host controller (every OTG-capable phone has
+        one), which is exactly the contract we want for an onboard robot brain.
+
+        There is deliberately no android.permission.USB_PERMISSION declaration:
+        that string is not a real platform permission. The real gate is
+        UsbManager.requestPermission(), which pops the system dialog the first
+        time this app touches each device. See UsbSerialManager.
+    -->
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="true" />
+
+    <!-- Keep the device awake-ish while the dashboard is on screen (optional,
+         the activity uses FLAG_KEEP_SCREEN_ON at runtime). No permission needed. -->
+
+    <application
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.RobotCar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+                AUTO-LAUNCH ON PLUG-IN.
+                When the Arduino's USB-OTG cable is inserted, the system matches
+                the attached device against @xml/device_filter; on a match it
+                starts (or foregrounds, thanks to singleTop) this activity and
+                AUTO-GRANTS USB access — no permission dialog for filtered gear.
+                The runtime BroadcastReceiver in UsbSerialManager covers the
+                "already running" case for devices that are not in the filter.
+            -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
+        </activity>
+
+    </application>
+
+</manifest>

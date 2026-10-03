@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Dark platform theme: the whole dashboard is drawn by Compose Material 3,
+        so this only has to (a) drop the action bar and (b) paint the window
+        background dark so there is no white flash before the first frame.
+    -->
+    <style name="Theme.RobotCar" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@color/window_background</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
+    </style>
+</resources>
