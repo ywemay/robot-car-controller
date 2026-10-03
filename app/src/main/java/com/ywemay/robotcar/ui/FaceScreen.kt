@@ -218,7 +218,7 @@ private fun FaceIllustration(
         val cx = w / 2f
         val cy = h / 2f
         val unit = min(w, h)
-        val faceR = unit * 0.30f * (1f + breath * 0.012f)
+        val faceR = unit * 0.32f * (1f + breath * 0.012f)
 
         // Faint halo — the "light" coming off the face.
         val haloCenter = Offset(cx, cy - faceR * 0.1f)
@@ -233,21 +233,23 @@ private fun FaceIllustration(
         )
 
         // ---- eyes ----
-        val eyeDx = faceR * 0.60f
-        val eyeW = faceR * 0.42f
-        val eyeFullH = faceR * 0.80f
+        // Proportions tuned so the pair reads as a face: eyes ~1.25:1 tall, one
+        // eye-width apart, and the smile sitting a comfortable gap below them.
+        val eyeDx = faceR * 0.48f
+        val eyeW = faceR * 0.48f
+        val eyeFullH = faceR * 0.60f
         val lidLineH = eyeW * 0.16f
         val eyeH = (eyeFullH * eyeOpen).coerceAtLeast(lidLineH)
         val eyeY = cy - faceR * 0.16f
-        val shift = gaze * faceR * 0.12f
+        val shift = gaze * faceR * 0.10f
 
         drawEye(Offset(cx - eyeDx + shift, eyeY), eyeW, eyeH, eyeColor)
         drawEye(Offset(cx + eyeDx + shift, eyeY), eyeW, eyeH, eyeColor)
 
         // ---- mouth: a wide, easy smile ----
         val mouthW = faceR * 1.05f
-        val arcH = mouthW * 0.62f
-        val mouthY = cy + faceR * 0.52f
+        val arcH = faceR * 0.58f
+        val mouthY = cy + faceR * 0.35f
         drawArc(
             color = mouthColor,
             startAngle = 18f,
@@ -255,7 +257,7 @@ private fun FaceIllustration(
             useCenter = false,
             topLeft = Offset(cx - mouthW / 2f, mouthY - arcH / 2f),
             size = Size(mouthW, arcH),
-            style = Stroke(width = faceR * 0.10f, cap = StrokeCap.Round),
+            style = Stroke(width = faceR * 0.085f, cap = StrokeCap.Round),
         )
     }
 }
