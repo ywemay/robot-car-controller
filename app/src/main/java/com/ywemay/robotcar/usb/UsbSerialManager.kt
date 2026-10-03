@@ -396,6 +396,15 @@ object UsbSerialManager {
         addLog(LogKind.SYS, "Debug log cleared")
     }
 
+    /**
+     * Publish an informational line (SYS) into the debug log from outside.
+     *
+     * Used by subsystems that are not the serial link itself — e.g. the web
+     * server announcing its URL — so the on-device panel shows one unified
+     * timeline of what the car brain is doing.
+     */
+    fun note(text: String) = addLog(LogKind.SYS, text)
+
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------

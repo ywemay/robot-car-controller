@@ -18,6 +18,14 @@
         android:name="android.hardware.usb.host"
         android:required="true" />
 
+    <!--
+        ============================ NETWORK ============================
+        Normal permission. Required for the embedded NanoHTTPD server to open
+        a listening TCP socket (the remote-control web UI + /cmd API). Also
+        lets the app read the Wi-Fi IPv4 address to print the connect URL.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Keep the device awake-ish while the dashboard is on screen (optional,
          the activity uses FLAG_KEEP_SCREEN_ON at runtime). No permission needed. -->
 

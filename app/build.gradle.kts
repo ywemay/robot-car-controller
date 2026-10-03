@@ -84,5 +84,9 @@ dependencies {
     // Provides UsbSerialProber + the per-chip driver set used by UsbSerialManager.
     implementation("com.github.mik3y:usb-serial-for-android:3.8.1")
 
+    // Embedded HTTP server — serves the remote-control web UI and the /cmd API.
+    // Same org.nanohttpd artifact already cached/proven in ~/Projects/ipcam-stream.
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

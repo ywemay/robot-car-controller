@@ -54,15 +54,18 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * The whole onboard dashboard.
+ * The onboard control dashboard.
  *
- * Fixed-height header (USB banner) + controls on top, and a weight(1f) log
- * panel that claims whatever vertical space is left and scrolls internally.
- * That is why the outer Column is deliberately NOT a verticalScroll: nesting a
- * scrollable LazyColumn inside one would give it an infinite height and crash.
+ * Fixed-height header (back-to-face + USB banner) + controls on top, and a
+ * weight(1f) log panel that claims whatever vertical space is left and scrolls
+ * internally. That is why the outer Column is deliberately NOT a verticalScroll:
+ * nesting a scrollable LazyColumn inside one would give it an infinite height
+ * and crash.
  */
 @Composable
 fun RobotCarScreen(
+    onClose: () -> Unit,
+    webUrl: String?,
     modifier: Modifier = Modifier,
     viewModel: RobotCarViewModel = viewModel(),
 ) {
@@ -79,6 +82,8 @@ fun RobotCarScreen(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        DashboardHeader(webUrl = webUrl, onClose = onClose)
+
         UsbStatusBanner(connection, onRetry = viewModel::retryConnection)
 
         DrivePad(onDrive = viewModel::onDrive)
@@ -95,6 +100,41 @@ fun RobotCarScreen(
             onClear = viewModel::clearLog,
             modifier = Modifier.weight(1f),
         )
+    }
+}
+
+/**
+ * Slim top bar: the remote-control URL (so the driver can hand it to a phone or
+ * laptop on the same Wi-Fi) and the button that returns to the car's face.
+ */
+@Composable
+private fun DashboardHeader(webUrl: String?, onClose: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "CONTROLS",
+                style = MaterialTheme.typography.labelMedium,
+                letterSpacing = 2.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = webUrl ?: "web server unavailable",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                color = if (webUrl != null) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    Color(0xFF8E5A5A)
+                },
+            )
+        }
+        TextButton(onClick = onClose) {
+            Text("◀  FACE", fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
