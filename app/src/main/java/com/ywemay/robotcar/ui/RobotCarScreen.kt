@@ -1,6 +1,7 @@
 package com.ywemay.robotcar.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -45,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ywemay.robotcar.RobotCarViewModel
+import com.ywemay.robotcar.control.Emotion
 import com.ywemay.robotcar.usb.CommandEngine
 import com.ywemay.robotcar.usb.LogEntry
 import com.ywemay.robotcar.usb.LogKind
@@ -73,6 +76,7 @@ fun RobotCarScreen(
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val pan by viewModel.pan.collectAsStateWithLifecycle()
     val tilt by viewModel.tilt.collectAsStateWithLifecycle()
+    val emotion by viewModel.emotion.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
@@ -85,6 +89,8 @@ fun RobotCarScreen(
         DashboardHeader(webUrl = webUrl, onClose = onClose)
 
         UsbStatusBanner(connection, onRetry = viewModel::retryConnection)
+
+        MoodStrip(current = emotion, onPick = viewModel::onEmotionChanged)
 
         DrivePad(onDrive = viewModel::onDrive)
 
@@ -134,6 +140,53 @@ private fun DashboardHeader(webUrl: String?, onClose: () -> Unit) {
         }
         TextButton(onClick = onClose) {
             Text("◀  FACE", fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/**
+ * Horizontal mood picker — the same [Emotion] list the remote web page renders,
+ * driven through the same [com.ywemay.robotcar.control.CarControl] hub, so a
+ * mood picked here and one picked in a browser are indistinguishable.
+ *
+ * A swipe-friendly row rather than a wrapped grid: nine moods would otherwise
+ * eat a third of the dashboard, and the log panel needs the height more.
+ */
+@Composable
+private fun MoodStrip(current: Emotion, onPick: (Emotion) -> Unit) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(Emotion.entries, key = { it.slug }) { mood ->
+            val active = mood == current
+            val tint = Color(mood.tint)
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(if (active) tint else Color.White.copy(alpha = 0.05f))
+                    .border(
+                        width = 1.dp,
+                        color = if (active) tint else Color.White.copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(50),
+                    )
+                    .clickable { onPick(mood) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(text = mood.emoji, fontSize = 15.sp)
+                Text(
+                    text = mood.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (active) {
+                        Color(0xFF06121A)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
         }
     }
 }

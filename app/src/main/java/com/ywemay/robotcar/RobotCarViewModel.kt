@@ -3,6 +3,7 @@ package com.ywemay.robotcar
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import com.ywemay.robotcar.control.CarControl
+import com.ywemay.robotcar.control.Emotion
 import com.ywemay.robotcar.usb.LogEntry
 import com.ywemay.robotcar.usb.UsbConnectionState
 import com.ywemay.robotcar.usb.UsbSerialManager
@@ -30,8 +31,14 @@ class RobotCarViewModel(application: Application) : AndroidViewModel(application
     val pan: StateFlow<Int> = CarControl.pan
     val tilt: StateFlow<Int> = CarControl.tilt
 
+    /** The car's face expression, shared with the web UI. */
+    val emotion: StateFlow<Emotion> = CarControl.emotion
+
     /** One of the five movement buttons; Stop is emitted as `D,S,0`. */
     fun onDrive(direction: Char) = CarControl.drive(direction)
+
+    /** Mood picker; presentation only — never reaches the serial link. */
+    fun onEmotionChanged(emotion: Emotion) = CarControl.setEmotion(emotion)
 
     /** Called on every drag frame; sends `C,<pan>,<tilt>` immediately. */
     fun onPanChanged(degrees: Int) = CarControl.setPan(degrees)

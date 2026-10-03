@@ -101,6 +101,7 @@ class MainActivity : ComponentActivity() {
 private fun RobotCarApp() {
     val viewModel: RobotCarViewModel = viewModel()
     val connection by viewModel.connection.collectAsStateWithLifecycle()
+    val emotion by viewModel.emotion.collectAsStateWithLifecycle()
     val webState by WebControlServer.state.collectAsStateWithLifecycle()
     val webUrl = (webState as? WebServerState.Running)?.url
 
@@ -120,6 +121,7 @@ private fun RobotCarApp() {
             )
         } else {
             FaceScreen(
+                emotion = emotion,
                 connection = connection,
                 webUrl = webUrl,
                 onOpenControls = { showControls = true },

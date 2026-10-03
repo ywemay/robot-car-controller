@@ -33,6 +33,37 @@ object CarControl {
     private val _lastCommand = MutableStateFlow<String?>(null)
     val lastCommand: StateFlow<String?> = _lastCommand.asStateFlow()
 
+    /**
+     * The car's current mood.
+     *
+     * Unlike everything else in this object an emotion is *not* a serial frame —
+     * nothing goes on the wire. It still belongs here for the same reason the
+     * gimbal pose does: the on-device face and the remote web page are two
+     * independent drivers of one piece of state, and the moment they each kept
+     * their own copy they would disagree.
+     */
+    private val _emotion = MutableStateFlow(Emotion.DEFAULT)
+    val emotion: StateFlow<Emotion> = _emotion.asStateFlow()
+
+    // ------------------------------------------------------------------
+    // Mood
+    // ------------------------------------------------------------------
+
+    /**
+     * Put the car in a different mood.
+     *
+     * Presentation only — no frame is emitted. The change is announced in the
+     * shared debug log so the on-device panel shows one timeline of everything
+     * the car brain is doing, whoever asked for it.
+     *
+     * No-op when the mood is unchanged, so a polling web page cannot spam the log.
+     */
+    fun setEmotion(emotion: Emotion) {
+        if (_emotion.value == emotion) return
+        _emotion.value = emotion
+        UsbSerialManager.note("Emotion: ${emotion.label}")
+    }
+
     // ------------------------------------------------------------------
     // Drive
     // ------------------------------------------------------------------

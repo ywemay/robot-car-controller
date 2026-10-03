@@ -1,6 +1,7 @@
 package com.ywemay.robotcar.web
 
 import com.ywemay.robotcar.control.CarControl
+import com.ywemay.robotcar.control.Emotion
 import com.ywemay.robotcar.usb.CommandEngine
 import com.ywemay.robotcar.usb.UsbConnectionState
 import com.ywemay.robotcar.usb.UsbSerialManager
@@ -18,6 +19,8 @@ import java.io.ByteArrayInputStream
  *   GET /drive?dir=R      -> alias of /cmd (friendly name).
  *   GET /camera?pan=&tilt=-> gimbal frame; either argument may be omitted.
  *   GET /stop             -> explicit kill frame (D,S,0).
+ *   GET /emotions         -> JSON list of every mood + the current one (drives the page's buttons).
+ *   GET /emotion?e=happy  -> change the car's expression (presentation only, no frame).
  *   GET /favicon.ico      -> 204 so browsers stop asking.
  *
  * Every command route funnels into [CarControl], the *same* hub the on-device
@@ -49,6 +52,11 @@ class RobotWebServer(
             "/camera" -> cameraRoute(params)
 
             "/stop" -> commandResponse(CarControl.stop())
+
+            // Mood: `/emotions` lists what exists, `/emotion?e=happy` sets one.
+            // Presentation only — nothing reaches the serial link.
+            "/emotions" -> jsonResponse(Response.Status.OK, emotionsJson())
+            "/emotion" -> emotionRoute(params)
 
             "/favicon.ico" ->
                 newFixedLengthResponse(Response.Status.NO_CONTENT, "image/x-icon", "")
@@ -100,6 +108,42 @@ class RobotWebServer(
                 ",\"frame\":" + q(CarControl.lastCommand.value ?: "") + "}",
         )
 
+    /**
+     * Set the car's mood. Accepts `e` (short) or `emotion` (explicit).
+     *
+     * Answers with the resolved slug so the caller gets canonical spelling even
+     * if it sent "HAPPY" with whitespace.
+     */
+    private fun emotionRoute(params: Map<String, List<String>>): Response {
+        val raw = first(params, "e") ?: first(params, "emotion")
+            ?: return badRequest("missing 'e' (one of " + emotionSlugs() + ")")
+
+        val emotion = Emotion.fromSlug(raw) ?: return badRequest("unknown emotion " + q(raw))
+        CarControl.setEmotion(emotion)
+        return jsonResponse(
+            Response.Status.OK,
+            "{\"ok\":true,\"emotion\":" + q(emotion.slug) + ",\"label\":" + q(emotion.label) + "}",
+        )
+    }
+
+    /**
+     * The mood list the control page builds its buttons from.
+     *
+     * Served rather than hard-coded in the page's JavaScript so the enum stays
+     * the single source of truth — adding a mood needs no page edit.
+     */
+    private fun emotionsJson(): String {
+        val items = Emotion.entries.joinToString(",") { e ->
+            "{\"slug\":" + q(e.slug) +
+                ",\"label\":" + q(e.label) +
+                ",\"emoji\":" + q(e.emoji) + "}"
+        }
+        return "{\"ok\":true,\"current\":" + q(CarControl.emotion.value.slug) +
+            ",\"emotions\":[" + items + "]}"
+    }
+
+    private fun emotionSlugs(): String = Emotion.entries.joinToString(" ") { it.slug }
+
     private fun statusJson(): String {
         val state = UsbSerialManager.state.value
         val connected = state.isConnected
@@ -112,6 +156,7 @@ class RobotWebServer(
             "\"pan\":" + CarControl.pan.value + "," +
             "\"tilt\":" + CarControl.tilt.value + "," +
             "\"last\":" + q(CarControl.lastCommand.value ?: "") + "," +
+            "\"emotion\":" + q(CarControl.emotion.value.slug) + "," +
             "\"address\":" + q(url) +
             "}"
     }

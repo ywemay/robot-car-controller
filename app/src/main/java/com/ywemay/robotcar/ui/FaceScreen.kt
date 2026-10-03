@@ -48,6 +48,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ywemay.robotcar.control.Emotion
+import com.ywemay.robotcar.control.EyeShape
+import com.ywemay.robotcar.control.MouthShape
 import com.ywemay.robotcar.usb.UsbConnectionState
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -63,12 +66,17 @@ import kotlin.random.Random
  * car looks "alive" while parked. Double-tap anywhere to open the on-device
  * control dashboard. A single tap just gets a blink (acknowledgement).
  *
- * Idle behaviour is deliberately unhurried: random blinks every few seconds,
- * the occasional double-blink, a slow sleepy blink now and then, and a small
- * wandering gaze — enough motion to read as alive without being a strobe.
+ * The [emotion] decides the expression — eye shape, brows, mouth and colour —
+ * and is driven by [com.ywemay.robotcar.control.CarControl], so the remote web
+ * page can change the car's mood and watch this face follow along.
+ *
+ * Idle behaviour is layered on top of the mood and is deliberately unhurried:
+ * random blinks every few seconds, the occasional double-blink, a slow sleepy
+ * blink now and then, and a small wandering gaze.
  */
 @Composable
 fun FaceScreen(
+    emotion: Emotion,
     connection: UsbConnectionState,
     webUrl: String?,
     onOpenControls: () -> Unit,
@@ -150,6 +158,7 @@ fun FaceScreen(
         contentAlignment = Alignment.Center,
     ) {
         FaceIllustration(
+            emotion = emotion,
             eyeOpen = eyeOpen,
             gaze = gaze,
             modifier = Modifier.fillMaxSize(),
@@ -183,16 +192,31 @@ fun FaceScreen(
                 fontFamily = FontFamily.Monospace,
                 color = if (webUrl != null) Color(0xFF4FC3F7).copy(alpha = 0.8f) else Color(0xFF6B4A4A),
             )
+            Spacer(Modifier.size(8.dp))
+            // Which mood is on, spelled out — several of them (sleepy especially)
+            // are subtle enough that a label is the only unambiguous confirmation.
+            Text(
+                text = "mood: " + emotion.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(emotion.tint).copy(alpha = 0.55f),
+            )
         }
     }
 }
 
 // ======================================================================
 // The face itself — drawn, not image assets, so it scales to any screen.
+//
+// Everything mood-specific is data: [Emotion] carries shape/openness/tilt and
+// this renderer just reads it. There is deliberately no per-emotion `when` here
+// — a new mood is a new row in the enum, not new drawing code.
 // ======================================================================
+
+private val PUPIL = Color(0xFF0A1319)
 
 @Composable
 private fun FaceIllustration(
+    emotion: Emotion,
     eyeOpen: Float,
     gaze: Float,
     modifier: Modifier = Modifier,
@@ -209,8 +233,8 @@ private fun FaceIllustration(
             label = "breath",
         )
 
-    val eyeColor = Color(0xFF7FE8FF)
-    val mouthColor = Color(0xFF53CDEC)
+    val tint = Color(emotion.tint)
+    val mouthColor = tint.copy(alpha = 0.88f)
 
     Canvas(modifier) {
         val w = size.width
@@ -220,11 +244,11 @@ private fun FaceIllustration(
         val unit = min(w, h)
         val faceR = unit * 0.32f * (1f + breath * 0.012f)
 
-        // Faint halo — the "light" coming off the face.
+        // Faint halo — the "light" coming off the face, tinted by the mood.
         val haloCenter = Offset(cx, cy - faceR * 0.1f)
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(eyeColor.copy(alpha = 0.10f), Color.Transparent),
+                colors = listOf(tint.copy(alpha = 0.12f), Color.Transparent),
                 center = haloCenter,
                 radius = faceR * 2.4f,
             ),
@@ -232,44 +256,213 @@ private fun FaceIllustration(
             center = haloCenter,
         )
 
-        // ---- eyes ----
+        // ---- shared geometry ------------------------------------------
         // Proportions tuned so the pair reads as a face: eyes ~1.25:1 tall, one
-        // eye-width apart, and the smile sitting a comfortable gap below them.
+        // eye-width apart, mouth a comfortable gap below them.
         val eyeDx = faceR * 0.48f
         val eyeW = faceR * 0.48f
-        val eyeFullH = faceR * 0.60f
+        val eyeBaseH = faceR * 0.60f
         val lidLineH = eyeW * 0.16f
-        val eyeH = (eyeFullH * eyeOpen).coerceAtLeast(lidLineH)
         val eyeY = cy - faceR * 0.16f
         val shift = gaze * faceR * 0.10f
+        val leftC = Offset(cx - eyeDx + shift, eyeY)
+        val rightC = Offset(cx + eyeDx + shift, eyeY)
 
-        drawEye(Offset(cx - eyeDx + shift, eyeY), eyeW, eyeH, eyeColor)
-        drawEye(Offset(cx + eyeDx + shift, eyeY), eyeW, eyeH, eyeColor)
+        // ---- eyes ------------------------------------------------------
+        if (emotion.wink) {
+            drawEye(rightC, emotion, eyeW, eyeBaseH, lidLineH, eyeOpen, tint)
+            drawShutLid(leftC, eyeW * 0.92f, mouthColor)
+        } else {
+            drawEye(leftC, emotion, eyeW, eyeBaseH, lidLineH, eyeOpen, tint)
+            drawEye(rightC, emotion, eyeW, eyeBaseH, lidLineH, eyeOpen, tint)
+        }
 
-        // ---- mouth: a wide, easy smile ----
+        // ---- brows -----------------------------------------------------
+        if (emotion.browTilt != 0f || emotion.browLift != 0f) {
+            val browY = eyeY - eyeBaseH * 0.5f - faceR * 0.20f - emotion.browLift * faceR * 0.30f
+            val browLen = eyeW * 1.10f
+            // >0 drops the inner ends (angry); <0 lifts them (worried).
+            val innerDrop = emotion.browTilt * faceR * 0.10f
+            val browStroke = faceR * 0.055f
+            drawLine(
+                color = mouthColor,
+                start = Offset(leftC.x - browLen / 2f, browY),
+                end = Offset(leftC.x + browLen / 2f, browY + innerDrop),
+                strokeWidth = browStroke,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = mouthColor,
+                start = Offset(rightC.x - browLen / 2f, browY + innerDrop),
+                end = Offset(rightC.x + browLen / 2f, browY),
+                strokeWidth = browStroke,
+                cap = StrokeCap.Round,
+            )
+        }
+
+        // ---- mouth -----------------------------------------------------
         val mouthW = faceR * 1.05f
         val arcH = faceR * 0.58f
         val mouthY = cy + faceR * 0.35f
-        drawArc(
-            color = mouthColor,
-            startAngle = 18f,
-            sweepAngle = 144f,
-            useCenter = false,
-            topLeft = Offset(cx - mouthW / 2f, mouthY - arcH / 2f),
-            size = Size(mouthW, arcH),
-            style = Stroke(width = faceR * 0.085f, cap = StrokeCap.Round),
-        )
+        val mouthStroke = faceR * 0.085f
+
+        when (emotion.mouth) {
+            MouthShape.SMILE -> drawArc(
+                color = mouthColor,
+                startAngle = 18f,
+                sweepAngle = 144f,
+                useCenter = false,
+                topLeft = Offset(cx - mouthW / 2f, mouthY - arcH / 2f),
+                size = Size(mouthW, arcH),
+                style = Stroke(width = mouthStroke, cap = StrokeCap.Round),
+            )
+
+            MouthShape.GRIN -> drawArc(
+                color = mouthColor,
+                startAngle = 4f,
+                sweepAngle = 172f,
+                useCenter = false,
+                topLeft = Offset(cx - mouthW * 0.55f, mouthY - arcH * 0.66f),
+                size = Size(mouthW * 1.10f, arcH * 1.32f),
+                style = Stroke(width = mouthStroke, cap = StrokeCap.Round),
+            )
+
+            MouthShape.FLAT -> drawLine(
+                color = mouthColor,
+                start = Offset(cx - mouthW * 0.30f, mouthY),
+                end = Offset(cx + mouthW * 0.30f, mouthY),
+                strokeWidth = mouthStroke,
+                cap = StrokeCap.Round,
+            )
+
+            MouthShape.FROWN -> drawArc(
+                color = mouthColor,
+                startAngle = 198f,
+                sweepAngle = 144f,
+                useCenter = false,
+                topLeft = Offset(cx - mouthW * 0.42f, mouthY - arcH * 0.42f),
+                size = Size(mouthW * 0.84f, arcH * 0.84f),
+                style = Stroke(width = mouthStroke, cap = StrokeCap.Round),
+            )
+
+            MouthShape.OPEN -> drawOval(
+                color = mouthColor,
+                topLeft = Offset(cx - mouthW * 0.21f, mouthY - arcH * 0.30f),
+                size = Size(mouthW * 0.42f, arcH * 0.62f),
+            )
+
+            MouthShape.SMIRK -> drawArc(
+                color = mouthColor,
+                startAngle = 20f,
+                sweepAngle = 118f,
+                useCenter = false,
+                topLeft = Offset(cx - mouthW * 0.18f, mouthY - arcH * 0.36f),
+                size = Size(mouthW * 0.72f, arcH * 0.72f),
+                style = Stroke(width = mouthStroke, cap = StrokeCap.Round),
+            )
+        }
+
+        // ---- flourishes ------------------------------------------------
+        if (emotion.blush) {
+            val blushW = faceR * 0.34f
+            val blushH = faceR * 0.19f
+            val blushY = mouthY - faceR * 0.06f
+            val blushColor = Color(0xFFFF8FC7).copy(alpha = 0.30f)
+            drawOval(
+                color = blushColor,
+                topLeft = Offset(cx - faceR * 0.86f - blushW / 2f, blushY - blushH / 2f),
+                size = Size(blushW, blushH),
+            )
+            drawOval(
+                color = blushColor,
+                topLeft = Offset(cx + faceR * 0.86f - blushW / 2f, blushY - blushH / 2f),
+                size = Size(blushW, blushH),
+            )
+        }
+
+        if (emotion.tear) {
+            val tearX = leftC.x - eyeW * 0.36f
+            val tearY = eyeY + eyeBaseH * 0.72f
+            drawOval(
+                color = Color(0xFFCDEBFF),
+                topLeft = Offset(tearX - faceR * 0.055f, tearY - faceR * 0.08f),
+                size = Size(faceR * 0.11f, faceR * 0.16f),
+            )
+        }
     }
 }
 
-/** A single eye: a pill that squashes to a thin lid line when closed. */
-private fun DrawScope.drawEye(center: Offset, w: Float, h: Float, color: Color) {
-    val r = min(w, h) / 2f
-    drawRoundRect(
+/**
+ * One eye, shaped and squashed by the mood.
+ *
+ * [open] is the idle-blink signal (1 = wide, 0 = shut), applied on top of the
+ * mood's own base openness — so a drawn expression still blinks like a real face.
+ */
+private fun DrawScope.drawEye(
+    center: Offset,
+    emotion: Emotion,
+    eyeW: Float,
+    eyeBaseH: Float,
+    lidLineH: Float,
+    open: Float,
+    tint: Color,
+) {
+    when (emotion.eyeShape) {
+        EyeShape.CAPSULE -> {
+            val h = (eyeBaseH * emotion.eyeOpen * open).coerceAtLeast(lidLineH)
+            val r = min(eyeW, h) / 2f
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(center.x - eyeW / 2f, center.y - h / 2f),
+                size = Size(eyeW, h),
+                cornerRadius = CornerRadius(r, r),
+            )
+        }
+
+        EyeShape.ROUND -> {
+            val d = eyeW * emotion.eyeOpen
+            val h = (d * open).coerceAtLeast(lidLineH)
+            drawOval(
+                color = tint,
+                topLeft = Offset(center.x - d / 2f, center.y - h / 2f),
+                size = Size(d, h),
+            )
+            // A dark pupil inside the disc — the "wide-eyed" look.
+            if (emotion.pupil > 0f && h > lidLineH * 1.6f) {
+                drawCircle(
+                    color = PUPIL,
+                    radius = d * 0.5f * emotion.pupil,
+                    center = center,
+                )
+            }
+        }
+
+        EyeShape.ARC -> {
+            // Closed-happy eye: the upper half of an ellipse ( ∩ ) that
+            // flattens out into a line on a blink.
+            val arcW = eyeW * 1.25f
+            val arcH = (eyeBaseH * 0.95f * open).coerceAtLeast(lidLineH * 0.6f)
+            drawArc(
+                color = tint,
+                startAngle = 180f,
+                sweepAngle = 180f,
+                useCenter = false,
+                topLeft = Offset(center.x - arcW / 2f, center.y - arcH / 2f),
+                size = Size(arcW, arcH),
+                style = Stroke(width = eyeBaseH * 0.19f, cap = StrokeCap.Round),
+            )
+        }
+    }
+}
+
+/** A shut eyelid — the winking eye. */
+private fun DrawScope.drawShutLid(center: Offset, width: Float, color: Color) {
+    drawLine(
         color = color,
-        topLeft = Offset(center.x - w / 2f, center.y - h / 2f),
-        size = Size(w, h),
-        cornerRadius = CornerRadius(r, r),
+        start = Offset(center.x - width / 2f, center.y),
+        end = Offset(center.x + width / 2f, center.y),
+        strokeWidth = width * 0.16f,
+        cap = StrokeCap.Round,
     )
 }
 

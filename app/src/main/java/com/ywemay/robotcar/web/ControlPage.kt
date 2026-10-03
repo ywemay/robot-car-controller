@@ -48,6 +48,10 @@ section{background:var(--panel);border:1px solid var(--line);border-radius:14px;
 input[type=range]{width:100%;accent-color:var(--accent);height:26px}
 .log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--dim);max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-all}
 .hint{font-size:11px;color:var(--dim);text-align:center;padding-bottom:6px}
+.moods{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px}
+.moods button{display:flex;align-items:center;justify-content:center;gap:7px;height:52px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);color:var(--fg);font:600 13px system-ui,sans-serif;cursor:pointer;transition:background .1s,transform .07s,border-color .1s}
+.moods button .e{font-size:18px;line-height:1}
+.moods button.on{background:var(--accent);border-color:var(--accent);color:#00222f;transform:translateY(-1px)}
 </style>
 </head>
 <body>
@@ -59,6 +63,11 @@ input[type=range]{width:100%;accent-color:var(--accent);height:26px}
     <div class="u" id="url"></div>
   </div>
 </header>
+
+<section>
+  <div class="lbl">FACE MOOD &middot; what the car looks like right now</div>
+  <div class="moods" id="moods"></div>
+</section>
 
 <section>
   <div class="lbl">DRIVE &middot; hold to move, release to stop</div>
@@ -104,7 +113,8 @@ input[type=range]{width:100%;accent-color:var(--accent);height:26px}
       pan=document.getElementById("pan"),
       tilt=document.getElementById("tilt"),
       panv=document.getElementById("panv"),
-      tiltv=document.getElementById("tiltv");
+      tiltv=document.getElementById("tiltv"),
+      moodsEl=document.getElementById("moods");
 
   function log(msg){
     var t=new Date().toTimeString().slice(0,8);
@@ -188,6 +198,48 @@ input[type=range]{width:100%;accent-color:var(--accent);height:26px}
   pan.addEventListener("change",function(){ panDrag=false; });
   tilt.addEventListener("change",function(){ tiltDrag=false; });
 
+  // ---- face mood ----------------------------------------------------------
+  // The button list is fetched, not hard-coded, so the Emotion enum on the
+  // phone stays the single source of truth.
+  var moodShown=null;
+
+  function paintMood(slug){
+    if(slug===moodShown){ return; }
+    moodShown=slug;
+    var kids=moodsEl.children;
+    for(var i=0;i<kids.length;i++){
+      kids[i].className=(kids[i].getAttribute("data-slug")===slug)?"on":"";
+    }
+  }
+
+  function sendMood(slug){
+    get("/emotion?e="+encodeURIComponent(slug)).then(function(r){
+      if(r&&r.ok){ paintMood(r.emotion); log("MOOD "+r.label); }
+    });
+  }
+
+  function buildMoods(){
+    get("/emotions").then(function(r){
+      if(!r||!r.emotions){ return; }
+      moodsEl.textContent="";
+      r.emotions.forEach(function(m){
+        var b=document.createElement("button");
+        b.setAttribute("data-slug",m.slug);
+        var e=document.createElement("span");
+        e.className="e";
+        e.textContent=m.emoji;
+        var t=document.createElement("span");
+        t.textContent=m.label;
+        b.appendChild(e);
+        b.appendChild(t);
+        b.addEventListener("click",function(){ sendMood(m.slug); });
+        moodsEl.appendChild(b);
+      });
+      paintMood(r.current);
+    });
+  }
+  buildMoods();
+
   // ---- status poll --------------------------------------------------------
   function poll(){
     get("/status").then(function(s){
@@ -197,6 +249,7 @@ input[type=range]{width:100%;accent-color:var(--accent);height:26px}
       else { dot.className="dot bad"; stateEl.textContent="No USB link"; }
       if(!panDrag){ pan.value=s.pan; panv.textContent=s.pan+"\u00B0"; }
       if(!tiltDrag){ tilt.value=s.tilt; tiltv.textContent=s.tilt+"\u00B0"; }
+      if(s.emotion){ paintMood(s.emotion); }
     });
   }
   setInterval(poll,1200);
